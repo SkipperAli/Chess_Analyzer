@@ -1,0 +1,1355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title> The Great Chess Analyzer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <h1>♟The Great Chess Analyzer</h1>
+
+  <div class="mode-selector">
+    <button class="mode-btn active" id="mode-live" onclick="setMode('live')" title="Analyze each move as you play">⚡ Live Analysis</button>
+    <button class="mode-btn" id="mode-calc" onclick="setMode('calc')" title="Analyze only when you click Analyze">🔍 Next-Move Calc</button>
+    <button class="mode-btn" id="mode-bot" onclick="setMode('bot')" title="Play against Stockfish">🤖 Play vs Bot</button>
+  </div>
+
+  <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+    <span id="status-dot"></span>
+    <span id="status-text">checking stockfish…</span>
+  </div>
+</header>
+
+<div class="main">
+  <!-- BOARD -->
+  <div class="board-panel">
+    <!-- Captures of the player at the TOP of the board -->
+    <div class="captured-bar" id="cap-top">
+      <div class="captured-side" id="cap-top-pieces"></div>
+      <div class="cap-advantage" id="cap-top-adv"></div>
+    </div>
+
+    <div id="board"></div>
+
+    <!-- Captures of the player at the BOTTOM of the board -->
+    <div class="captured-bar" id="cap-bottom">
+      <div class="captured-side" id="cap-bottom-pieces"></div>
+      <div class="cap-advantage" id="cap-bottom-adv"></div>
+    </div>
+
+    <div class="turn-bar">
+      <span id="turn-pawn">♙</span>
+      <span id="turn-text">White to move</span>
+      <span style="margin-left:auto;" id="move-count-label">Move 1</span>
+    </div>
+
+    <!-- Live / Calc mode: text move input -->
+    <div class="move-input-row" id="move-input-row">
+      <input id="move-input" placeholder="Type move (e.g. e2e4, Nf3, O-O) and press Enter" autocomplete="off" spellcheck="false">
+      <button class="btn primary" onclick="submitTextMove()">Go</button>
+    </div>
+
+    <!-- Next-Move Calc: Analyze button -->
+    <div class="analyze-btn-row" id="analyze-btn-row" style="display:none">
+      <button class="btn primary" id="analyze-position-btn" onclick="doNextBestAnalysis()">🔍 Analyze Position</button>
+    </div>
+
+    <!-- Bot mode controls -->
+    <div class="bot-controls" id="bot-controls" style="display:none">
+      <label>Difficulty:</label>
+      <input type="range" id="difficulty-slider" min="1" max="20" value="10" oninput="updateDifficultyLabel()">
+      <span id="difficulty-label">Level 10</span>
+      <div class="player-color-select">
+        <button class="color-btn active" id="play-white-btn" onclick="setBotPlayerColor('white')">⬜ White</button>
+        <button class="color-btn" id="play-black-btn" onclick="setBotPlayerColor('black')">⬛ Black</button>
+      </div>
+    </div>
+
+    <div class="board-controls">
+      <div class="nav-controls">
+        <button class="btn-nav" id="nav-start" onclick="jumpToMove(-1)" title="Start">⟪</button>
+        <button class="btn-nav" id="nav-prev"  onclick="navigateMove(-1)" title="Previous">◀</button>
+        <button class="btn-nav" id="nav-next"  onclick="navigateMove(1)"  title="Next">▶</button>
+        <button class="btn-nav" id="nav-end"   onclick="jumpToMove(999)"  title="End">⟫</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn" id="undo-btn" onclick="undoMove()" title="Take back last move">↩ Undo</button>
+        <button class="btn" onclick="flipBoard()">⇅ Flip</button>
+        <button class="btn" id="hint-btn" onclick="showHints()">💡 Hint</button>
+        <button class="btn" id="pgn-btn" onclick="openPgnModal()">📋 PGN</button>
+        <button class="btn" id="bot-move-btn" style="display:none;border-color:var(--brilliant);color:var(--brilliant)" onclick="requestBotMove()">🤖 Bot Move</button>
+        <button class="btn danger" onclick="newGame()">✕ New</button>
+      </div>
+    </div>
+
+    <div id="result-banner"></div>
+  </div>
+
+  <div id="drag-ghost"></div>
+
+  <!-- SIDE PANEL -->
+  <div class="side-panel">
+    <div class="panel-tabs" id="panel-tabs">
+      <div class="tab active" onclick="switchTab('analysis')">Analysis</div>
+      <div class="tab" onclick="switchTab('moves')">Moves</div>
+      <div class="tab" onclick="switchTab('hints')">Hints</div>
+      <div class="tab" onclick="switchTab('book')">Book</div>
+      <div class="tab" onclick="switchTab('summary')">Summary</div>
+    </div>
+
+    <!-- ANALYSIS TAB -->
+    <div class="tab-content active" id="tab-analysis">
+      <div class="eval-section">
+        <div class="eval-label">Evaluation <span style="text-transform:none;letter-spacing:0">(White's view)</span></div>
+        <div class="eval-bar-wrap">
+          <span id="eval-black-score" class="eval-score-black"></span>
+          <div id="eval-bar-black"></div>
+          <div id="eval-bar-white"></div>
+          <span id="eval-white-score" class="eval-score-white"></span>
+        </div>
+      </div>
+      <div id="last-analysis">
+        <div style="color:var(--text-muted);font-size:0.75rem;padding:20px 0;text-align:center;">
+          Make a move to see analysis
+        </div>
+      </div>
+    </div>
+
+    <!-- MOVES TAB -->
+    <div class="tab-content" id="tab-moves">
+      <div class="move-list" id="move-list">
+        <div class="move-list-header">
+          <div>#</div><div>White</div><div>Black</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- HINTS TAB -->
+    <div class="tab-content" id="tab-hints">
+      <div id="hints-content" style="color:var(--text-muted);font-size:0.75rem;padding:20px 0;text-align:center;">
+        Click "Hint" to see top moves
+      </div>
+    </div>
+
+    <!-- BOOK TAB -->
+    <div class="tab-content" id="tab-book">
+      <div id="book-content" style="color:var(--text-muted);font-size:0.75rem;padding:20px 0;text-align:center;">
+        Make a move to see opening book
+      </div>
+    </div>
+
+    <!-- SUMMARY TAB -->
+    <div class="tab-content" id="tab-summary">
+      <div id="summary-content">
+        <div style="color:var(--text-muted);font-size:0.75rem;padding:20px 0;text-align:center;">Play moves to see summary</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Overlays -->
+<div id="analyzing-overlay">
+  <div class="spinner"></div>
+  <div class="analyzing-text" id="overlay-text">STOCKFISH ANALYZING…</div>
+</div>
+
+<div id="promo-modal" onclick="if(event.target===this)closePromoModal()" title="Click outside to cancel">
+  <div class="promo-box" id="promo-pieces"></div>
+</div>
+
+<div id="pgn-modal" onclick="if(event.target===this)closePgnModal()">
+  <div class="pgn-box">
+    <h3 id="pgn-modal-title">📋 Load PGN</h3>
+    <div id="pgn-modal-desc" style="font-size:0.7rem;color:var(--text-muted)">Paste a PGN or move list.</div>
+    <textarea id="pgn-input" placeholder="Paste PGN here..."></textarea>
+    <div id="pgn-error" style="color:var(--blunder);font-size:0.72rem;display:none"></div>
+    <div class="pgn-actions">
+      <button class="btn" onclick="closePgnModal()">Cancel</button>
+      <button class="btn primary" id="pgn-load-btn" onclick="loadPgn()">Load & Analyze</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/static/chess.js"></script>
+<script>
+// ── CONFIG ───────────────────────────────────────────────────────────────────
+// Same-origin when served by app.py; falls back to localhost if opened as a file.
+const API = location.protocol.startsWith('http') ? '/api' : 'http://localhost:5000/api';
+
+const PIECE_UNICODE = {
+  wK:'♔', wQ:'♕', wR:'♖', wB:'♗', wN:'♘', wP:'♙',
+  bK:'♚', bQ:'♛', bR:'♜', bB:'♝', bN:'♞', bP:'♟'
+};
+
+const CLASS_META = {
+  brilliant: { icon:'!!',  color:'var(--brilliant)', label:'Brilliant' },
+  best:      { icon:'★',   color:'var(--best)',      label:'Best' },
+  great:     { icon:'!',   color:'var(--great)',      label:'Great' },
+  book:      { icon:'📖',  color:'var(--book)',       label:'Book' },
+  inaccuracy:{ icon:'?',   color:'var(--inaccuracy)', label:'Inaccuracy' },
+  mistake:   { icon:'??',  color:'var(--mistake)',    label:'Mistake' },
+  blunder:   { icon:'???', color:'var(--blunder)',    label:'Blunder' },
+};
+
+const EMPTY_MSG = t => `<div style="color:var(--text-muted);font-size:0.75rem;padding:20px 0;text-align:center;">${t}</div>`;
+
+// ── STATE ────────────────────────────────────────────────────────────────────
+let game = new Chess();
+let flipped = false;
+let selected = null;
+let validMoves = [];
+let lastFrom = null, lastTo = null;
+let moveHistory = [];
+let currentMoveIdx = -1;
+let pendingPromo = null;
+let currentEval = 0;
+let engineOk = null;          // null = unknown, true/false after status check
+
+let currentMode = 'live';     // 'live' | 'calc' | 'bot'
+let botPlayerColor = 'white'; // colour the human plays
+let botThinking = false;
+let busy = false;             // blocks board input (analysis / PGN replay)
+let gen = 0;                  // bumped on every reset; stale async results are dropped
+
+let dragFrom = null;
+let dragGhost = null;
+
+// ── HELPERS ──────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function atLatest() { return currentMoveIdx === moveHistory.length - 1; }
+
+// Engine evals are White's view in pawns; mates come back as ±(100 - n/100).
+function isMateEval(v) { return v != null && Math.abs(v) >= 90; }
+function fmtEval(v) {
+  if (v == null || isNaN(v)) return '–';
+  if (isMateEval(v)) {
+    const n = Math.round(10000 - Math.abs(v) * 100);
+    return (v > 0 ? '+' : '−') + (n <= 0 ? '#' : 'M' + n);
+  }
+  return (v > 0 ? '+' : '') + Number(v).toFixed(2);
+}
+function uciToSan(fen, uci) {
+  if (!fen || !uci) return uci || '';
+  try {
+    const g = new Chess(fen);
+    const r = g.move({ from: uci.slice(0,2), to: uci.slice(2,4), promotion: uci[4] || undefined });
+    return r ? r.san : uci;
+  } catch (e) { return uci; }
+}
+async function postJSON(path, body) {
+  const r = await fetch(`${API}/${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  return r.json();
+}
+
+// ── INIT ─────────────────────────────────────────────────────────────────────
+window.addEventListener('load', () => {
+  dragGhost = document.getElementById('drag-ghost');
+  checkStockfish();
+  updateDifficultyLabel();
+  refreshAll();
+  document.getElementById('move-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') submitTextMove();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { closePromoModal(); closePgnModal(); return; }
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.key === 'ArrowLeft')  navigateMove(-1);
+    if (e.key === 'ArrowRight') navigateMove(1);
+    if (e.key === 'ArrowUp')    { e.preventDefault(); jumpToMove(-1); }
+    if (e.key === 'ArrowDown')  { e.preventDefault(); jumpToMove(999); }
+  });
+});
+
+async function checkStockfish() {
+  const dot = document.getElementById('status-dot');
+  const txt = document.getElementById('status-text');
+  try {
+    const r = await fetch(`${API}/stockfish-status`);
+    const d = await r.json();
+    engineOk = !!d.ok;
+    dot.className = d.ok ? 'ok' : 'err';
+    txt.textContent = d.ok ? 'Stockfish connected' : 'Stockfish not found — board still works';
+    txt.title = d.path || '';
+    if (!d.ok && moveHistory.length === 0) {
+      if (currentMode === 'bot') showBotInfo();
+      else setAnalysisPanel(EMPTY_MSG('Make a move to see analysis'));
+    }
+  } catch (e) {
+    engineOk = false;
+    dot.className = 'err';
+    txt.textContent = 'Backend offline – start app.py';
+  }
+}
+
+// ── MODE MANAGEMENT ──────────────────────────────────────────────────────────
+function setMode(mode) {
+  currentMode = mode;
+  ['live','calc','bot'].forEach(m => {
+    document.getElementById('mode-' + m).classList.toggle('active', m === mode);
+  });
+
+  document.getElementById('move-input-row').style.display = mode === 'bot' ? 'none' : 'flex';
+  document.getElementById('analyze-btn-row').style.display = mode === 'calc' ? 'block' : 'none';
+  document.getElementById('bot-controls').style.display = mode === 'bot' ? 'flex' : 'none';
+  document.getElementById('bot-move-btn').style.display = mode === 'bot' ? 'inline-block' : 'none';
+  document.getElementById('pgn-btn').style.display = mode === 'bot' ? 'none' : 'inline-block';
+
+  flipped = mode === 'bot' && botPlayerColor === 'black';
+  resetGame(false);
+
+  if (mode === 'bot') {
+    switchTab('analysis');
+    if (botPlayerColor === 'black') setTimeout(requestBotMove, 400);
+  } else if (mode === 'calc') {
+    setAnalysisPanel(EMPTY_MSG('Make moves, then click <b>Analyze Position</b> to see best moves'));
+  }
+}
+
+function updateDifficultyLabel() {
+  const val = parseInt(document.getElementById('difficulty-slider').value);
+  const diffInfo = [null,
+    {name:'Beginner', elo:800},  {name:'Beginner', elo:900},
+    {name:'Easy',    elo:1000}, {name:'Easy',    elo:1100},
+    {name:'Easy',    elo:1200}, {name:'Casual',  elo:1300},
+    {name:'Casual',  elo:1400}, {name:'Club',    elo:1500},
+    {name:'Club',    elo:1600}, {name:'Club',    elo:1700},
+    {name:'Intermediate',elo:1800},{name:'Intermediate',elo:1900},
+    {name:'Advanced',elo:2000},{name:'Advanced',elo:2100},
+    {name:'Strong',  elo:2200},{name:'Strong',  elo:2300},
+    {name:'Expert',  elo:2500},{name:'Expert',  elo:2700},
+    {name:'Master',  elo:2900},{name:'Grandmaster',elo:3200}
+  ];
+  const info = diffInfo[val];
+  document.getElementById('difficulty-label').textContent = `${info.name} (~${info.elo})`;
+}
+
+function setBotPlayerColor(color) {
+  botPlayerColor = color;
+  document.getElementById('play-white-btn').classList.toggle('active', color === 'white');
+  document.getElementById('play-black-btn').classList.toggle('active', color === 'black');
+  flipped = (color === 'black');
+  resetGame(false);
+  if (color === 'black') setTimeout(requestBotMove, 300);
+}
+
+function showBotInfo() {
+  setAnalysisPanel(`
+    <div class="bot-info-panel">
+      <h4>🤖 Play vs Stockfish</h4>
+      <div class="analysis-detail" style="line-height:2">
+        You play: <span>${botPlayerColor === 'white' ? '⬜ White' : '⬛ Black'}</span><br>
+        Make your move, then Stockfish will respond.<br>
+        Use the difficulty slider to adjust strength.
+      </div>
+    </div>`);
+}
+
+function setAnalysisPanel(html) {
+  const note = engineOk === false
+    ? `<div class="engine-off-note">Stockfish isn't available, so moves aren't being analyzed. Set <b>STOCKFISH_PATH</b> and restart app.py.</div>`
+    : '';
+  document.getElementById('last-analysis').innerHTML = note + html;
+}
+
+// ── BOARD RENDER ─────────────────────────────────────────────────────────────
+function canInteract() {
+  if (busy || botThinking || game.game_over()) return false;
+  if (currentMode === 'bot') return atLatest() && game.turn() === botPlayerColor[0];
+  return true;  // live / calc: moving from an earlier position branches from there
+}
+
+function renderBoard() {
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+  const interactive = canInteract();
+  const checkSq = game.in_check() ? findKing(game.turn()) : null;
+
+  for (let row = 0; row < 8; row++) {
+    for (let col = 0; col < 8; col++) {
+      const displayRow = flipped ? 7 - row : row;
+      const displayCol = flipped ? 7 - col : col;
+      const rank = 7 - displayRow;
+      const file = displayCol;
+      const sq = 'abcdefgh'[file] + (rank + 1);
+
+      const div = document.createElement('div');
+      div.className = `sq ${(rank + file) % 2 === 0 ? 'dark' : 'light'}`;
+      div.dataset.sq = sq;
+
+      if (col === 0) {
+        const r = document.createElement('span');
+        r.className = 'coord-rank';
+        r.textContent = rank + 1;
+        div.appendChild(r);
+      }
+      if (row === 7) {
+        const f = document.createElement('span');
+        f.className = 'coord-file';
+        f.textContent = 'abcdefgh'[file];
+        div.appendChild(f);
+      }
+
+      if (lastFrom === sq) div.classList.add('last-from');
+      if (lastTo === sq)   div.classList.add('last-to');
+      if (selected === sq) div.classList.add('selected');
+      if (checkSq === sq)  div.classList.add('in-check');
+
+      const piece = game.get(sq);
+      if (validMoves.includes(sq)) div.classList.add(piece ? 'valid-capture' : 'valid-move');
+
+      if (piece) {
+        const span = document.createElement('span');
+        span.className = 'piece ' + (piece.color === 'w' ? 'white' : 'black');
+        span.textContent = PIECE_UNICODE[piece.color + piece.type.toUpperCase()];
+        if (interactive && piece.color === game.turn()) {
+          span.style.pointerEvents = 'auto';
+          span.addEventListener('pointerdown', e => onDragStart(e, sq, piece));
+        }
+        div.appendChild(span);
+      }
+
+      div.addEventListener('click', () => onSquareClick(sq));
+      board.appendChild(div);
+    }
+  }
+}
+
+function findKing(color) {
+  for (let r = 1; r <= 8; r++) for (let f = 0; f < 8; f++) {
+    const sq = 'abcdefgh'[f] + r;
+    const p = game.get(sq);
+    if (p && p.type === 'k' && p.color === color) return sq;
+  }
+  return null;
+}
+
+// Re-render everything that depends on the current position / history
+function refreshAll() {
+  renderBoard();
+  updateTurnBar();
+  updateNavButtons();
+  updateCapturedPieces();
+  checkGameOver();
+}
+
+// ── DRAG & DROP (pointer events: mouse + touch) ─────────────────────────────
+function onDragStart(e, sq, piece) {
+  if (e.button !== undefined && e.button !== 0) return;
+  if (!canInteract() || piece.color !== game.turn()) return;
+  e.preventDefault();
+
+  dragFrom = sq;
+  selected = sq;
+  validMoves = getValidTargets(sq);
+  renderBoard();
+
+  dragGhost.textContent = PIECE_UNICODE[piece.color + piece.type.toUpperCase()];
+  dragGhost.className = piece.color === 'w' ? 'white' : 'black';
+  dragGhost.style.display = 'block';
+  moveDragGhost(e);
+
+  document.addEventListener('pointermove', onDragMove);
+  document.addEventListener('pointerup', onDragEnd);
+  document.addEventListener('pointercancel', onDragEnd);
+}
+
+function moveDragGhost(e) {
+  dragGhost.style.left = e.clientX + 'px';
+  dragGhost.style.top  = e.clientY + 'px';
+}
+
+function squareAt(x, y) {
+  const el = document.elementFromPoint(x, y);
+  return el?.closest?.('.sq')?.dataset?.sq || null;
+}
+
+function onDragMove(e) {
+  moveDragGhost(e);
+  document.querySelectorAll('.sq.drag-over').forEach(s => s.classList.remove('drag-over'));
+  const sq = squareAt(e.clientX, e.clientY);
+  if (sq && validMoves.includes(sq)) document.querySelector(`.sq[data-sq="${sq}"]`)?.classList.add('drag-over');
+}
+
+function onDragEnd(e) {
+  document.removeEventListener('pointermove', onDragMove);
+  document.removeEventListener('pointerup', onDragEnd);
+  document.removeEventListener('pointercancel', onDragEnd);
+  dragGhost.style.display = 'none';
+  document.querySelectorAll('.sq.drag-over').forEach(s => s.classList.remove('drag-over'));
+
+  const from = dragFrom;
+  dragFrom = null;
+  const toSq = e.type === 'pointercancel' ? null : squareAt(e.clientX, e.clientY);
+
+  if (toSq && toSq === from) {                 // plain click: keep the selection
+    lastDragEnd = { sq: toSq, t: performance.now() };
+    return;
+  }
+  if (toSq && from && validMoves.includes(toSq)) { tryMove(from, toSq); return; }
+  selected = null; validMoves = [];
+  renderBoard();
+}
+
+let lastDragEnd = { sq: null, t: 0 };
+function onSquareClick(sq) {
+  if (!canInteract()) return;
+  // the click that trails a press/release on the same piece shouldn't deselect it
+  if (sq === lastDragEnd.sq && performance.now() - lastDragEnd.t < 300) return;
+  const piece = game.get(sq);
+
+  if (selected && validMoves.includes(sq)) { tryMove(selected, sq); return; }
+
+  if (piece && piece.color === game.turn() && sq !== selected) {
+    selected = sq;
+    validMoves = getValidTargets(sq);
+  } else {
+    selected = null;
+    validMoves = [];
+  }
+  renderBoard();
+}
+
+function getValidTargets(sq) {
+  return [...new Set(game.moves({ square: sq, verbose: true }).map(m => m.to))];
+}
+
+function tryMove(from, to) {
+  const p = game.get(from);
+  if (p?.type === 'p' && ((p.color === 'w' && to[1] === '8') || (p.color === 'b' && to[1] === '1'))) {
+    openPromoModal(from, to);
+    return;
+  }
+  doMove(from, to);
+}
+
+// ── MAKE MOVE ────────────────────────────────────────────────────────────────
+function makeEntry(result, fenBefore, fenAfter) {
+  return {
+    san: result.san,
+    uci: result.from + result.to + (result.promotion || ''),
+    from: result.from, to: result.to,
+    color: result.color,
+    player: result.color === 'w' ? 'white' : 'black',
+    captured: result.captured || null,
+    fenBefore, fenAfter,
+    classification: null, evalBefore: null, evalAfter: null,
+    alternatives: [], best_move: null, is_best: null,
+  };
+}
+
+// Append a move after the currently viewed position (drops any later moves).
+function commitEntry(entry) {
+  moveHistory = moveHistory.slice(0, currentMoveIdx + 1);
+  moveHistory.push(entry);
+  currentMoveIdx = moveHistory.length - 1;
+  lastFrom = entry.from; lastTo = entry.to;
+  selected = null; validMoves = [];
+  refreshAll();
+  updateMoveList();
+  updateSummary();
+}
+
+async function doMove(from, to, promotion = null) {
+  if (busy) return;
+  if (currentMode === 'bot' && !atLatest()) { toast('Jump to the latest move first (⟫)'); return; }
+
+  const dropped = moveHistory.length - 1 - currentMoveIdx;
+  if (dropped > 0 && !confirm(`Playing here discards the ${dropped} later move${dropped > 1 ? 's' : ''}. Continue?`)) {
+    selected = null; validMoves = []; renderBoard();
+    return;
+  }
+
+  const fenBefore = game.fen();
+  const result = game.move(promotion ? { from, to, promotion } : { from, to });
+  if (!result) { toast('Illegal move'); selected = null; validMoves = []; renderBoard(); return; }
+
+  const entry = makeEntry(result, fenBefore, game.fen());
+  entry.evalAfter = currentMode === 'live' ? null : currentEval;
+  commitEntry(entry);
+
+  if (currentMode === 'live' && engineOk !== false) {
+    const myGen = gen;
+    busy = true;
+    const analysis = await analyzeMove(entry.fenBefore, entry.uci, entry.fenAfter);
+    busy = false;
+    if (myGen !== gen || !moveHistory.includes(entry)) return;
+    if (analysis) {
+      Object.assign(entry, {
+        classification: analysis.classification,
+        evalBefore: analysis.eval_before,
+        evalAfter: analysis.eval_after,
+        alternatives: analysis.alternatives || [],
+        best_move: analysis.best_move,
+        is_best: analysis.is_best,
+        player: analysis.player || entry.player,
+      });
+      currentEval = analysis.eval_after;
+      updateEvalBar(currentEval);
+      if (moveHistory[currentMoveIdx] === entry) showAnalysisCard(entry);
+      updateMoveList();
+      updateSummary();
+    } else {
+      setAnalysisPanel(moveOnlyCard(entry));
+    }
+    renderBoard();
+  } else if (currentMode !== 'bot') {
+    setAnalysisPanel(moveOnlyCard(entry));
+  }
+
+  loadBookMoves(game.fen());
+
+  if (currentMode === 'bot' && !game.game_over() && game.turn() !== botPlayerColor[0]) {
+    setTimeout(requestBotMove, 300);
+  }
+}
+
+async function analyzeMove(fenBefore, move, fenAfter) {
+  showOverlay('STOCKFISH ANALYZING…');
+  try {
+    const d = await postJSON('analyze', { fen_before: fenBefore, move, fen_after: fenAfter });
+    if (d.error) {
+      toast('Analysis unavailable: ' + d.error, 4000);
+      if (/stockfish not found/i.test(d.error)) { engineOk = false; checkStockfish(); }
+      return null;
+    }
+    return d;
+  } catch (e) {
+    toast('Backend error – is app.py running?');
+    return null;
+  } finally {
+    hideOverlay();
+  }
+}
+
+function undoMove() {
+  if (busy || botThinking || moveHistory.length === 0) return;
+  // always takes back from the end of the game
+  let target = moveHistory.length - 2;
+  if (currentMode === 'bot') {
+    // go back to the last position where it's the human's turn
+    const sideToMoveAfter = t => t === -1 ? moveHistory[0].fenBefore.split(' ')[1] : (moveHistory[t].color === 'w' ? 'b' : 'w');
+    while (target >= -1 && sideToMoveAfter(target) !== botPlayerColor[0]) target--;
+    if (target < -1) { toast('Nothing to undo — use ✕ New'); return; }
+  }
+  moveHistory = moveHistory.slice(0, target + 1);
+  currentMoveIdx = target;
+  applyPositionAtIdx(currentMoveIdx);
+  updateSummary();
+}
+
+// ── BOT MODE ─────────────────────────────────────────────────────────────────
+async function requestBotMove() {
+  if (currentMode !== 'bot' || game.game_over() || botThinking || !atLatest()) return;
+  const botColor = botPlayerColor === 'white' ? 'b' : 'w';
+  if (game.turn() !== botColor) return;
+
+  const myGen = gen;
+  botThinking = true;
+  renderBoard();
+  updateTurnBar();
+
+  const difficulty = parseInt(document.getElementById('difficulty-slider').value);
+  setAnalysisPanel(`
+    <div class="bot-info-panel">
+      <h4>🤖 Stockfish Thinking…</h4>
+      <div class="analysis-detail">
+        Difficulty: <span>Level ${difficulty}</span><br>
+        <div class="bot-thinking" style="margin-top:8px">
+          <div class="spinner" style="width:16px;height:16px;border-width:2px"></div>
+          Calculating best move…
+        </div>
+      </div>
+    </div>`);
+
+  try {
+    const fenBefore = game.fen();
+    const d = await postJSON('bot_move', { fen: fenBefore, difficulty });
+    if (myGen !== gen) return;               // game was reset while waiting
+    if (d.error) {
+      toast('Bot error: ' + d.error, 4000);
+      showBotInfo();
+      return;
+    }
+
+    const result = game.move({ from: d.move.slice(0, 2), to: d.move.slice(2, 4), promotion: d.move[4] || undefined });
+    if (!result) { toast('Bot returned an illegal move'); showBotInfo(); return; }
+
+    const entry = makeEntry(result, fenBefore, game.fen());
+    entry.evalAfter = d.eval;
+    entry.best_move = d.move;
+    currentEval = d.eval;
+    updateEvalBar(d.eval);
+    botThinking = false;
+    commitEntry(entry);
+
+    setAnalysisPanel(`
+      <div class="bot-info-panel">
+        <h4>🤖 Bot Played: ${esc(result.san)}</h4>
+        <div class="analysis-detail" style="line-height:2">
+          Move: <span>${esc(result.san)}</span><br>
+          Eval: <span>${fmtEval(d.eval)}</span><br>
+          ${game.game_over() ? 'Game over.' : 'Your turn to move.'}
+        </div>
+      </div>`);
+    loadBookMoves(game.fen());
+  } catch (e) {
+    if (myGen === gen) toast('Backend error – is app.py running?');
+  } finally {
+    if (myGen === gen) {
+      botThinking = false;
+      renderBoard();
+      updateTurnBar();
+    }
+  }
+}
+
+// ── NEXT-MOVE CALCULATOR ──────────────────────────────────────────────────────
+async function doNextBestAnalysis() {
+  if (busy) return;
+  if (game.game_over()) { toast('Game is over — nothing to analyze'); return; }
+  const myGen = gen, fen = game.fen(), idx = currentMoveIdx;
+  showOverlay('ANALYZING POSITION…');
+  try {
+    const d = await postJSON('next_best', { fen });
+    if (myGen !== gen || game.fen() !== fen) return;
+    if (d.error) { toast('Error: ' + d.error, 4000); return; }
+    if (!d.moves?.length) { toast('No moves found'); return; }
+
+    // top line eval = position eval (White's view)
+    currentEval = d.moves[0].eval;
+    updateEvalBar(currentEval);
+    if (idx >= 0 && moveHistory[idx]) moveHistory[idx].evalAfter = currentEval;
+
+    const turn = game.turn() === 'w' ? '⬜ White' : '⬛ Black';
+    const movesHtml = d.moves.map((m, i) => `
+      <div class="next-best-move" onclick="applyHint('${esc(m.move)}')">
+        <div style="display:flex;align-items:center">
+          <span class="next-best-rank">#${i+1}</span>
+          <span class="next-best-san">${esc(m.san)}</span>
+          <span style="color:var(--text-muted);font-size:0.65rem;margin-left:8px">${esc(m.move)}</span>
+        </div>
+        <span class="next-best-eval" style="color:${evalColor(m.eval, game.turn())}">${fmtEval(m.eval)}</span>
+      </div>`).join('');
+
+    setAnalysisPanel(`
+      <div class="next-best-card">
+        <h4>Best Moves for ${turn}</h4>
+        ${movesHtml}
+        <div class="eval-note">Evals are from White's point of view. Click a move to play it.</div>
+      </div>`);
+    switchTab('analysis');
+  } catch (e) {
+    toast('Backend error – is app.py running?');
+  } finally {
+    hideOverlay();
+  }
+}
+
+// green = good for the side to move
+function evalColor(v, turn) {
+  const forMover = turn === 'w' ? v : -v;
+  return forMover > 0.5 ? 'var(--best)' : forMover < -0.5 ? 'var(--blunder)' : 'var(--text)';
+}
+
+// ── TEXT MOVE INPUT ───────────────────────────────────────────────────────────
+function submitTextMove() {
+  const input = document.getElementById('move-input');
+  const text = input.value.trim();
+  if (!text) return;
+  if (!canInteract()) { toast('Board is busy'); return; }
+
+  let mv = null;
+  if (/^[a-h][1-8][a-h][1-8][qrbn]?$/i.test(text)) {
+    const t = text.toLowerCase();
+    mv = game.move({ from: t.slice(0, 2), to: t.slice(2, 4), promotion: t[4] || undefined });
+  }
+  if (!mv) mv = game.move(text) || game.move(text.replace(/^([nbrqk])/, c => c.toUpperCase()));
+  if (!mv) { toast(`Invalid move: "${text}"`); return; }
+
+  game.undo();
+  input.value = '';
+  doMove(mv.from, mv.to, mv.promotion || null);
+}
+
+// ── PROMOTION ────────────────────────────────────────────────────────────────
+function openPromoModal(from, to) {
+  pendingPromo = { from, to };
+  const color = game.turn();
+  const pieces = color === 'w'
+    ? [['q','♕'],['r','♖'],['b','♗'],['n','♘']]
+    : [['q','♛'],['r','♜'],['b','♝'],['n','♞']];
+  const box = document.getElementById('promo-pieces');
+  box.innerHTML = '';
+  pieces.forEach(([type, sym]) => {
+    const d = document.createElement('div');
+    d.className = 'promo-piece';
+    d.textContent = sym;
+    d.onclick = () => {
+      const p = pendingPromo;
+      closePromoModal();
+      if (p) doMove(p.from, p.to, type);
+    };
+    box.appendChild(d);
+  });
+  document.getElementById('promo-modal').classList.add('show');
+}
+
+function closePromoModal() {
+  const wasOpen = document.getElementById('promo-modal').classList.contains('show');
+  document.getElementById('promo-modal').classList.remove('show');
+  pendingPromo = null;
+  if (wasOpen) { selected = null; validMoves = []; renderBoard(); }
+}
+
+// ── UI UPDATES ────────────────────────────────────────────────────────────────
+function updateTurnBar() {
+  const turn = game.turn();
+  document.getElementById('turn-pawn').textContent = turn === 'w' ? '♙' : '♟';
+  let turnText;
+  if (game.game_over()) turnText = 'Game over';
+  else if (currentMode === 'bot' && botThinking) turnText = '🤖 Bot is thinking…';
+  else turnText = turn === 'w' ? 'White to move' : 'Black to move';
+  if (!atLatest() && moveHistory.length) turnText += '  ·  viewing earlier position';
+  document.getElementById('turn-text').textContent = turnText;
+  const fullmove = parseInt(game.fen().split(' ')[5]) || 1;
+  document.getElementById('move-count-label').textContent = `Move ${fullmove}`;
+}
+
+function updateEvalBar(evalVal) {
+  if (evalVal == null || isNaN(evalVal)) return;
+  const clamped = isMateEval(evalVal) ? Math.sign(evalVal) * 10 : Math.max(-10, Math.min(10, evalVal));
+  const whitePct = 50 + (clamped / 10) * 50;
+  document.getElementById('eval-bar-black').style.width = (100 - whitePct) + '%';
+  document.getElementById('eval-bar-white').style.width = whitePct + '%';
+
+  const whiteScore = document.getElementById('eval-white-score');
+  const blackScore = document.getElementById('eval-black-score');
+  const label = fmtEval(evalVal).replace(/^[+−]/, '');
+  whiteScore.textContent = evalVal > 0.05 ? label : '';
+  blackScore.textContent = evalVal < -0.05 ? label : '';
+}
+
+function moveOnlyCard(m) {
+  return `
+    <div class="analysis-card" style="border-left:3px solid var(--border)">
+      <div class="analysis-detail">
+        Move: <span>${esc(m.san)}</span>
+        ${m.evalAfter != null && currentMode !== 'live' ? `<br>Eval: <span>${fmtEval(m.evalAfter)}</span>` : ''}
+      </div>
+    </div>`;
+}
+
+function showAnalysisCard(m) {
+  const meta = CLASS_META[m.classification] || CLASS_META.best;
+  const player = m.player || (m.color === 'w' ? 'white' : 'black');
+  const playerLabel = player === 'white' ? '⬜ White' : '⬛ Black';
+  const playerColor = player === 'white' ? '#e8eaf0' : '#aaa';
+  const classDesc = {
+    brilliant: 'Spectacular sacrifice — best or near-best move!',
+    best: 'Top engine choice.',
+    great: 'Critical or only move maintaining advantage.',
+    book: 'Standard opening theory move.',
+    inaccuracy: 'Small mistake — eval drop under 0.5.',
+    mistake: 'Significant mistake — eval drop 0.5 to 2.0.',
+    blunder: 'Catastrophic mistake — hangs material or loses position.',
+  }[m.classification] || '';
+
+  const alts = (m.alternatives || []).map((a, i) =>
+    `<span>${i+1}. ${esc(uciToSan(m.fenBefore, a.move))} (${fmtEval(a.eval)})</span>`).join('<br>');
+
+  setAnalysisPanel(`
+    <div class="analysis-card" style="border-left:3px solid ${meta.color}">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="classification-badge" style="background:color-mix(in srgb, ${meta.color} 14%, transparent);color:${meta.color}">
+          <span class="classification-icon">${meta.icon}</span>
+          ${meta.label}
+        </div>
+        <div style="font-size:0.72rem;color:${playerColor};font-weight:700">${playerLabel}</div>
+      </div>
+      <div style="font-size:0.68rem;color:var(--text-muted);margin-bottom:8px;font-style:italic">${classDesc}</div>
+      <div class="analysis-detail">
+        Move: <span>${esc(m.san)}</span><br>
+        Eval before: <span>${fmtEval(m.evalBefore)}</span><br>
+        Eval after: <span>${fmtEval(m.evalAfter)}</span><br>
+        ${!m.is_best && m.best_move ? `Best was: <span>${esc(uciToSan(m.fenBefore, m.best_move))}</span><br>` : ''}
+        ${alts ? `<br>Top engine moves:<br>${alts}` : ''}
+      </div>
+    </div>`);
+  switchTab('analysis');
+}
+
+function updateMoveList() {
+  const list = document.getElementById('move-list');
+  list.innerHTML = `<div class="move-list-header"><div>#</div><div>White</div><div>Black</div></div>`;
+
+  // if the game started with Black to move, pad the first row
+  const offset = moveHistory.length && moveHistory[0].color === 'b' ? 1 : 0;
+  const cells = Array(offset).fill(null).concat(moveHistory);
+  for (let i = 0; i < cells.length; i += 2) {
+    const row = document.createElement('div');
+    row.className = 'move-row';
+    const numCell = document.createElement('div');
+    numCell.textContent = (i / 2 + 1);
+    row.appendChild(numCell);
+    row.appendChild(makeMoveCell(cells[i], i - offset));
+    row.appendChild(makeMoveCell(cells[i + 1], i + 1 - offset));
+    list.appendChild(row);
+  }
+  list.querySelector('.move-active')?.scrollIntoView({ block: 'nearest' });
+}
+
+function makeMoveCell(m, idx) {
+  const div = document.createElement('div');
+  if (!m) return div;
+  const meta = m.classification ? (CLASS_META[m.classification] || CLASS_META.best) : null;
+  const isActive = idx === currentMoveIdx;
+  div.style.cursor = 'pointer';
+  if (isActive) {
+    div.style.background = 'var(--surface)';
+    if (meta) div.style.borderLeft = `2px solid ${meta.color}`;
+    div.classList.add('move-active');
+  }
+  div.innerHTML = `
+    <span class="move-dot" style="background:${meta ? meta.color : 'var(--border)'}"></span>
+    <span class="move-san" style="${isActive ? 'color:var(--accent)' : ''}">${esc(m.san)}</span>
+    ${meta ? `<span class="move-class">${meta.icon}</span>` : ''}`;
+  div.addEventListener('click', () => jumpToMove(idx));
+  return div;
+}
+
+// ── SUMMARY ──────────────────────────────────────────────────────────────────
+function updateSummary() {
+  const container = document.getElementById('summary-content');
+  const analyzed = moveHistory.filter(m => m.classification).length;
+  if (analyzed === 0) { container.innerHTML = EMPTY_MSG('Play moves to see summary'); return; }
+
+  const order = ['brilliant','best','great','book','inaccuracy','mistake','blunder'];
+  const sideCounts = side => {
+    const c = {}; order.forEach(k => c[k] = 0);
+    moveHistory.forEach(m => { if (m.classification && m.color === side && c[m.classification] != null) c[m.classification]++; });
+    return c;
+  };
+  const w = sideCounts('w'), b = sideCounts('b');
+
+  container.innerHTML = `
+    <div style="font-size:0.68rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:10px">
+      ${analyzed} moves analyzed · ⬜ White / ⬛ Black
+    </div>
+    <div class="summary-grid">
+      ${order.map(k => {
+        const meta = CLASS_META[k];
+        const total = w[k] + b[k];
+        const zero = total === 0;
+        return `
+          <div class="summary-card ${zero ? 'zero' : ''}"
+               ${zero ? '' : `onclick="jumpToMoveClass('${k}')" title="Click to cycle through ${meta.label} moves"`}>
+            <div>
+              <div class="summary-label" style="color:${meta.color}">${meta.icon} ${meta.label}</div>
+              <div style="font-size:0.62rem;color:var(--text-muted);margin-top:2px">${w[k]} / ${b[k]}</div>
+            </div>
+            <div class="summary-count" style="color:${meta.color}">${total}</div>
+          </div>`;
+      }).join('')}
+    </div>`;
+}
+
+const classCycleIdx = {};
+function jumpToMoveClass(cls) {
+  const indices = moveHistory.map((m, i) => m.classification === cls ? i : -1).filter(i => i >= 0);
+  if (!indices.length) return;
+  if (!classCycleIdx[cls] || classCycleIdx[cls] >= indices.length) classCycleIdx[cls] = 0;
+  jumpToMove(indices[classCycleIdx[cls]]);
+  classCycleIdx[cls]++;
+}
+
+// ── HINTS ─────────────────────────────────────────────────────────────────────
+async function showHints() {
+  const container = document.getElementById('hints-content');
+  switchTab('hints');
+  if (game.game_over()) { container.innerHTML = EMPTY_MSG('Game is over'); return; }
+  container.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:12px 0;">Loading hints…</div>';
+  const fen = game.fen();
+  try {
+    const d = await postJSON('hint', { fen });
+    if (game.fen() !== fen) return;
+    if (d.error) { container.innerHTML = `<div style="color:var(--blunder);font-size:0.75rem">${esc(d.error)}</div>`; return; }
+    if (!d.hints?.length) { container.innerHTML = EMPTY_MSG('No hints for this position'); return; }
+    const turn = game.turn();
+    container.innerHTML = d.hints.map((h, i) => `
+      <div class="hint-move" onclick="applyHint('${esc(h.move)}')">
+        <div>
+          <div class="hint-rank">#${i+1} suggestion</div>
+          <div style="margin-top:4px;font-weight:600">${esc(h.san || h.move)}</div>
+        </div>
+        <div class="hint-eval" style="color:${evalColor(h.eval, turn)}">${fmtEval(h.eval)}</div>
+      </div>`).join('') + `<div class="eval-note">Evals are from White's point of view.</div>`;
+  } catch (e) {
+    container.innerHTML = '<div style="color:var(--blunder);font-size:0.75rem">Backend error – is app.py running?</div>';
+  }
+}
+
+function applyHint(uci) {
+  if (!canInteract()) { toast(currentMode === 'bot' ? "Wait for your turn" : 'Board is busy'); return; }
+  let from = uci.slice(0, 2), to = uci.slice(2, 4);
+  // Lichess sends castling as king-takes-rook (e1h1); convert to e1g1
+  if (game.get(from)?.type === 'k') {
+    const fix = { e1h1:'g1', e1a1:'c1', e8h8:'g8', e8a8:'c8' }[from + to];
+    if (fix) to = fix;
+  }
+  doMove(from, to, uci[4] || null);
+}
+
+// ── CAPTURED PIECES ───────────────────────────────────────────────────────────
+const PIECE_VALUES_JS = { p:1, n:3, b:3, r:5, q:9, k:0 };
+
+function updateCapturedPieces() {
+  // pieces taken BY each colour, up to the position being viewed
+  const takenBy = { w: [], b: [] };
+  for (let i = 0; i <= currentMoveIdx && i < moveHistory.length; i++) {
+    const m = moveHistory[i];
+    if (m.captured) takenBy[m.color].push(m.captured);
+  }
+  // material from the board itself, so promotions are counted correctly
+  const material = { w: 0, b: 0 };
+  for (let r = 1; r <= 8; r++) for (let f = 0; f < 8; f++) {
+    const p = game.get('abcdefgh'[f] + r);
+    if (p) material[p.color] += PIECE_VALUES_JS[p.type];
+  }
+
+  const bottom = flipped ? 'b' : 'w';
+  const top = bottom === 'w' ? 'b' : 'w';
+  renderCaptured('cap-top', top, takenBy[top], material[top] - material[bottom]);
+  renderCaptured('cap-bottom', bottom, takenBy[bottom], material[bottom] - material[top]);
+}
+
+function renderCaptured(prefix, color, pieces, diff) {
+  const victimColor = color === 'w' ? 'b' : 'w';
+  const order = 'pnbrq';
+  const sorted = pieces.slice().sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  const html = sorted.map(t => `<span class="cap-piece">${PIECE_UNICODE[victimColor + t.toUpperCase()]}</span>`).join('');
+  document.getElementById(prefix + '-pieces').innerHTML =
+    `<span style="color:var(--text-muted);font-size:0.65rem;margin-right:6px">${color === 'w' ? '⬜' : '⬛'}</span>` +
+    (html || '<span style="color:var(--border);font-size:0.65rem">—</span>');
+  document.getElementById(prefix + '-adv').textContent = diff > 0 ? '+' + diff : '';
+}
+
+// ── NAVIGATION ────────────────────────────────────────────────────────────────
+function jumpToMove(idx) {
+  if (moveHistory.length === 0 || busy || botThinking) return;
+  const target = Math.max(-1, Math.min(moveHistory.length - 1, idx));
+  if (target === currentMoveIdx) return;
+  currentMoveIdx = target;
+  applyPositionAtIdx(currentMoveIdx);
+}
+
+function navigateMove(delta) { jumpToMove(currentMoveIdx + delta); }
+
+function applyPositionAtIdx(idx) {
+  selected = null; validMoves = [];
+
+  if (idx === -1) {
+    const startFen = moveHistory[0]?.fenBefore;
+    game = startFen ? new Chess(startFen) : new Chess();
+    lastFrom = null; lastTo = null;
+    updateEvalBar(0);
+    setAnalysisPanel(EMPTY_MSG('Start position'));
+  } else {
+    const mv = moveHistory[idx];
+    game = new Chess(mv.fenAfter);
+    lastFrom = mv.from; lastTo = mv.to;
+    if (mv.evalAfter != null) updateEvalBar(mv.evalAfter);
+    if (mv.classification) showAnalysisCard(mv);
+    else setAnalysisPanel(moveOnlyCard(mv));
+  }
+
+  refreshAll();
+  updateMoveList();
+}
+
+function updateNavButtons() {
+  const atStart = currentMoveIdx <= -1;
+  const atEnd   = atLatest();
+  document.getElementById('nav-start').disabled = atStart;
+  document.getElementById('nav-prev').disabled  = atStart;
+  document.getElementById('nav-next').disabled  = atEnd;
+  document.getElementById('nav-end').disabled   = atEnd;
+  document.getElementById('undo-btn').disabled  = moveHistory.length === 0;
+}
+
+function flipBoard() {
+  flipped = !flipped;
+  renderBoard();
+  updateCapturedPieces();
+}
+
+function resetGame(confirm_needed = true) {
+  if (confirm_needed && moveHistory.length && !confirm('Start new game?')) return;
+  gen++;
+  game = new Chess();
+  moveHistory = [];
+  currentMoveIdx = -1;
+  lastFrom = null; lastTo = null;
+  selected = null; validMoves = [];
+  currentEval = 0;
+  botThinking = false;
+  busy = false;
+  hideOverlay();
+  closePromoModal();
+  updateEvalBar(0);
+  updateMoveList();
+  updateSummary();
+  refreshAll();
+  setAnalysisPanel(EMPTY_MSG('Make a move to see analysis'));
+  document.getElementById('hints-content').innerHTML = EMPTY_MSG('Click "Hint" to see top moves');
+  document.getElementById('book-content').innerHTML = EMPTY_MSG('Make a move to see opening book');
+  if (currentMode === 'bot') showBotInfo();
+}
+
+function newGame() {
+  resetGame(true);
+  if (currentMode === 'bot' && botPlayerColor === 'black' && moveHistory.length === 0) setTimeout(requestBotMove, 300);
+}
+
+function checkGameOver() {
+  const banner = document.getElementById('result-banner');
+  let text = null, color = 'var(--text-muted)', bg = 'var(--surface2)';
+  if (game.in_checkmate()) {
+    const winner = game.turn() === 'w' ? 'Black' : 'White';
+    text = `${winner} wins by checkmate`;
+    color = winner === 'White' ? '#fff' : '#ccc';
+    bg = 'rgba(220,50,50,0.2)';
+  } else if (game.in_stalemate()) text = 'Stalemate – Draw';
+  else if (game.insufficient_material()) text = 'Draw – insufficient material';
+  else if (game.in_threefold_repetition()) text = 'Draw – threefold repetition';
+  else if (game.in_draw()) text = 'Draw – 50-move rule';
+
+  banner.style.display = text ? 'block' : 'none';
+  if (text) {
+    banner.textContent = text;
+    banner.style.color = color;
+    banner.style.background = bg;
+  }
+}
+
+function switchTab(name) {
+  const names = ['analysis', 'moves', 'hints', 'book', 'summary'];
+  document.querySelectorAll('.tab').forEach((t, i) => t.classList.toggle('active', names[i] === name));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+}
+
+// ── BOOK ─────────────────────────────────────────────────────────────────────
+let bookReq = 0;
+async function loadBookMoves(fen) {
+  const myReq = ++bookReq;
+  const container = document.getElementById('book-content');
+  container.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:12px 0;">Fetching opening book…</div>';
+  try {
+    const d = await postJSON('book', { fen });
+    if (myReq !== bookReq) return;   // a newer request superseded this one
+    if (d.error) { container.innerHTML = EMPTY_MSG('Opening book unavailable'); return; }
+    if (!d.moves?.length) { container.innerHTML = EMPTY_MSG('No book moves — out of opening theory'); return; }
+    const opening = d.opening ? `<div style="color:var(--accent);font-size:0.72rem;margin-bottom:12px;padding:8px;background:var(--surface2);border:1px solid var(--border)">${esc(d.opening.name)}</div>` : '';
+    container.innerHTML = opening + d.moves.map(m => `
+      <div class="hint-move" style="flex-direction:column;align-items:flex-start;gap:6px" onclick="applyHint('${esc(m.uci)}')">
+        <div style="display:flex;justify-content:space-between;width:100%">
+          <span style="font-weight:700;font-size:0.85rem">${esc(m.san)}</span>
+          <span style="color:var(--text-muted);font-size:0.7rem">${m.total > 1000 ? (m.total/1000).toFixed(1)+'k' : m.total} games</span>
+        </div>
+        <div style="width:100%;height:6px;background:var(--border);display:flex;overflow:hidden">
+          <div style="width:${m.white_pct}%;background:#e8eaf0"></div>
+          <div style="width:${m.draw_pct}%;background:#666"></div>
+          <div style="width:${m.black_pct}%;background:#222"></div>
+        </div>
+        <div style="display:flex;gap:12px;font-size:0.65rem">
+          <span style="color:#e8eaf0">W ${m.white_pct}%</span>
+          <span style="color:#888">D ${m.draw_pct}%</span>
+          <span style="color:#aaa">B ${m.black_pct}%</span>
+        </div>
+      </div>`).join('');
+  } catch (e) {
+    if (myReq === bookReq) container.innerHTML = EMPTY_MSG('Opening book unavailable');
+  }
+}
+
+// ── PGN MODAL ────────────────────────────────────────────────────────────────
+function openPgnModal() {
+  if (busy) return;
+  document.getElementById('pgn-input').value = '';
+  document.getElementById('pgn-error').style.display = 'none';
+  const btn = document.getElementById('pgn-load-btn');
+  if (currentMode === 'calc' || engineOk === false) {
+    document.getElementById('pgn-modal-title').textContent = '🔍 Load PGN';
+    document.getElementById('pgn-modal-desc').textContent = engineOk === false
+      ? 'Stockfish is unavailable — the game will be loaded without analysis.'
+      : 'Paste PGN to load position — no analysis yet. Navigate moves, then click Analyze Position for best moves.';
+    btn.textContent = 'Load (No Analysis)';
+    btn.onclick = loadPgnCalc;
+  } else {
+    document.getElementById('pgn-modal-title').textContent = '📋 Load PGN';
+    document.getElementById('pgn-modal-desc').textContent = 'Paste a PGN or move list. Moves will be replayed and analyzed.';
+    btn.textContent = 'Load & Analyze';
+    btn.onclick = loadPgn;
+  }
+  document.getElementById('pgn-modal').classList.add('show');
+  setTimeout(() => document.getElementById('pgn-input').focus(), 50);
+}
+
+function closePgnModal() {
+  document.getElementById('pgn-modal').classList.remove('show');
+}
+
+// Shared: reset board and replay server-provided moves locally.
+function startFreshForPgn() {
+  resetGame(false);
+  return gen;
+}
+
+async function loadPgn() {
+  const pgn = document.getElementById('pgn-input').value.trim();
+  const errEl = document.getElementById('pgn-error');
+  errEl.style.display = 'none';
+  if (!pgn) return;
+
+  showOverlay('ANALYZING GAME…');
+  let d;
+  try {
+    d = await postJSON('analyze_pgn', { pgn });
+  } catch (e) {
+    hideOverlay();
+    errEl.textContent = 'Backend error – is app.py running?';
+    errEl.style.display = 'block';
+    return;
+  }
+  hideOverlay();
+  if (d.error) { errEl.textContent = d.error; errEl.style.display = 'block'; return; }
+
+  closePgnModal();
+  const myGen = startFreshForPgn();
+  busy = true;
+  renderBoard();
+
+  const h = d.headers || {};
+  toast(`Loaded: ${h.White || '?'} vs ${h.Black || '?'} — replaying ${d.moves.length} moves`, 3000);
+
+  try {
+    const start = d.moves[0]?.fen_before;
+    if (start) game = new Chess(start);
+    for (const mv of d.moves) {
+      await new Promise(res => setTimeout(res, 60));
+      if (myGen !== gen) return;      // user reset / switched mode mid-replay
+      const fenBefore = game.fen();
+      const result = game.move({ from: mv.uci.slice(0,2), to: mv.uci.slice(2,4), promotion: mv.uci[4] || undefined });
+      if (!result) { toast('Stopped: could not replay ' + mv.san); break; }
+      const entry = makeEntry(result, fenBefore, game.fen());
+      Object.assign(entry, {
+        classification: mv.classification,
+        evalBefore: mv.eval_before,
+        evalAfter: mv.eval_after,
+        alternatives: mv.alternatives || [],
+        best_move: mv.best_move,
+        is_best: mv.is_best,
+        player: mv.player,
+      });
+      currentEval = mv.eval_after;
+      updateEvalBar(currentEval);
+      commitEntry(entry);
+      showAnalysisCard(entry);
+    }
+  } finally {
+    if (myGen === gen) {
+      busy = false;
+      refreshAll();
+      loadBookMoves(game.fen());
+      toast(`Done! ${moveHistory.length} moves analyzed.`);
+    }
+  }
+}
+
+// ── PGN LOAD FOR CALC MODE (no analysis) ──────────────────────────────────────
+async function loadPgnCalc() {
+  const pgn = document.getElementById('pgn-input').value.trim();
+  const errEl = document.getElementById('pgn-error');
+  errEl.style.display = 'none';
+  if (!pgn) return;
+
+  showOverlay('LOADING PGN…');
+  let d;
+  try {
+    d = await postJSON('next_best_pgn', { pgn });
+  } catch (e) {
+    hideOverlay();
+    errEl.textContent = 'Backend error – is app.py running?';
+    errEl.style.display = 'block';
+    return;
+  }
+  hideOverlay();
+  if (d.error) { errEl.textContent = d.error; errEl.style.display = 'block'; return; }
+
+  closePgnModal();
+  startFreshForPgn();
+
+  const h = d.headers || {};
+  const playerInfo = esc((h.White || '?') + ' vs ' + (h.Black || '?'));
+
+  for (const mv of d.moves) {
+    const fenBefore = game.fen();
+    const result = game.move({ from: mv.uci.slice(0,2), to: mv.uci.slice(2,4), promotion: mv.uci[4] || undefined });
+    if (!result) { toast('Stopped: could not replay ' + mv.san); break; }
+    moveHistory.push(makeEntry(result, fenBefore, game.fen()));
+  }
+
+  currentMoveIdx = moveHistory.length - 1;
+  const last = moveHistory[currentMoveIdx];
+  lastFrom = last?.from || null;
+  lastTo = last?.to || null;
+  updateMoveList();
+  refreshAll();
+  loadBookMoves(game.fen());
+
+  setAnalysisPanel(`
+    <div class="next-best-card">
+      <h4>📋 ${playerInfo} — ${moveHistory.length} moves loaded</h4>
+      <div style="font-size:0.72rem;color:var(--text-muted);margin-top:8px">
+        Navigate with ◀ ▶, then click<br>
+        <b style="color:var(--accent)">🔍 Analyze Position</b> for the 3 best moves.
+      </div>
+    </div>`);
+  switchTab('analysis');
+  toast('Loaded ' + moveHistory.length + ' moves — navigate and analyze!', 4000);
+}
+
+// ── OVERLAY ───────────────────────────────────────────────────────────────────
+function showOverlay(text) {
+  document.getElementById('overlay-text').textContent = text || 'STOCKFISH ANALYZING…';
+  document.getElementById('analyzing-overlay').classList.add('show');
+}
+function hideOverlay() {
+  document.getElementById('analyzing-overlay').classList.remove('show');
+}
+
+// ── TOAST ─────────────────────────────────────────────────────────────────────
+let toastTimer = null;
+function toast(msg, duration = 3000) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), duration);
+}
+</script>
+</body>
+</html>
